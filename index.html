@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gerador de Rifas - Ministério Feminino</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; background:#fdf6ee; color:#333; max-width:1000px; margin:0 auto; padding:20px; }
+  h1 { color:#c2255f; }
+  label { font-weight:bold; display:block; margin-top:14px; }
+  textarea { width:100%; height:300px; font-size:15px; padding:8px; box-sizing:border-box; }
+  input[type=number] { width:80px; padding:4px; font-size:15px; }
+  button { background:#c2255f; color:#fff; border:0; padding:12px 20px; font-size:16px; border-radius:8px; cursor:pointer; margin:12px 8px 0 0; }
+  button:disabled { background:#bbb; cursor:default; }
+  #status { margin-top:10px; font-weight:bold; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; margin-top:20px; }
+  .card { background:#fff; border-radius:8px; padding:8px; text-align:center; box-shadow:0 1px 4px #0003; }
+  .card img { width:100%; border-radius:4px; }
+  .card a { color:#c2255f; font-weight:bold; font-size:14px; }
+</style>
+</head>
+<body>
+<h1>Gerador de Rifas</h1>
+
+<label>1) Escolha a imagem do modelo (o PNG da rifa em branco):</label>
+<input type="file" id="arquivo" accept="image/*">
+
+<label>2) Irmãs responsáveis (uma por linha, na ordem):</label>
+<textarea id="nomes">Natália
+Eloisa
+Monique
+Iris
+Mônica Lima
+Meire
+Ednuzia
+Tânia
+Cleuma
+Ruth
+Mônica Fernandes
+Fátima
+Raryane
+Ana Lúcia
+Jéssica Bertoleza
+Jéssica Vieira
+Monalisa
+Liduina
+Victoria
+Val
+Ester
+Eloisa
+</textarea>
+
+<label>3) Números por irmã: <input type="number" id="qtd" value="10" min="1" max="10"> (o modelo tem 10 círculos)</label>
+<label>Primeiro número: <input type="number" id="inicio" value="1" min="1"></label>
+
+<button id="btnGerar">Gerar imagens</button>
+<button id="btnZip" disabled>Baixar todas (ZIP)</button>
+<div id="status"></div>
+<div id="grid"></div>
+
+<script>
+// ===== AJUSTES (posições medidas na imagem 1080x1920) =====
+const COR = '#c2255f';                 // cor rosa dos textos
+const RAIO = 77;                       // raio dos círculos
+const CENTROS = [                      // centro de cada círculo [x, y]
+  [269, 794], [450, 794], [631, 794], [811, 794],
+  [269, 960], [450, 960], [631, 960], [811, 960],
+  [450, 1126], [631, 1126]
+];
+const NOME_X = 249;                    // centro horizontal do nome
+const NOME_Y = 1850;                   // posição vertical do nome (abaixo de "Responsável")
+const NOME_LARGURA_MAX = 460;          // largura máxima do nome
+const FONTE = 'Arial, Helvetica, sans-serif';
+// ==========================================================
+
+let imagemModelo = null;
+let resultados = []; // {nome, arquivo, blob, url}
+
+document.getElementById('arquivo').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { imagemModelo = img; setStatus('Modelo carregado (' + img.width + 'x' + img.height + ').'); };
+  img.src = URL.createObjectURL(f);
+});
+
+function setStatus(t) { document.getElementById('status').textContent = t; }
+
+function semAcento(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function desenhar(nome, numeros) {
+  const c = document.createElement('canvas');
+  c.width = imagemModelo.width;
+  c.height = imagemModelo.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(imagemModelo, 0, 0);
+
+  ctx.fillStyle = COR;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // números dentro dos círculos
+  numeros.forEach((n, i) => {
+    const [x, y] = CENTROS[i];
+    const tam = String(n).length >= 3 ? 56 : 68;
+    ctx.font = 'bold ' + tam + 'px ' + FONTE;
+    ctx.fillText(String(n), x, y + 3);
+  });
+
+  // nome da responsável (diminui a fonte se for grande)
+  let tam = 54;
+  ctx.font = 'bold ' + tam + 'px ' + FONTE;
+  while (ctx.measureText(nome).width > NOME_LARGURA_MAX && tam > 20) {
+    tam -= 2;
+    ctx.font = 'bold ' + tam + 'px ' + FONTE;
+  }
+  ctx.fillText(nome, NOME_X, NOME_Y);
+
+  return new Promise(res => c.toBlob(b => res(b), 'image/png'));
+}
+
+document.getElementById('btnGerar').addEventListener('click', async () => {
+  if (!imagemModelo) { alert('Primeiro escolha a imagem do modelo.'); return; }
+  const nomes = document.getElementById('nomes').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const qtd = Math.min(parseInt(document.getElementById('qtd').value) || 10, CENTROS.length);
+  let proximo = parseInt(document.getElementById('inicio').value) || 1;
+
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  resultados.forEach(r => URL.revokeObjectURL(r.url));
+  resultados = [];
+  document.getElementById('btnZip').disabled = true;
+
+  for (let i = 0; i < nomes.length; i++) {
+    const nums = Array.from({ length: qtd }, (_, k) => proximo + k);
+    proximo += qtd;
+    setStatus('Gerando ' + (i + 1) + ' de ' + nomes.length + '...');
+    const blob = await desenhar(nomes[i], nums);
+    const arquivo = 'rifa_' + String(i + 1).padStart(2, '0') + '_' + semAcento(nomes[i]) + '.png';
+    const url = URL.createObjectURL(blob);
+    resultados.push({ nome: nomes[i], arquivo, blob, url });
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<img src="' + url + '"><div>' + nomes[i] + '<br><small>' + nums[0] + ' a ' + nums[nums.length - 1] + '</small></div>' +
+                     '<a href="' + url + '" download="' + arquivo + '">Baixar</a>';
+    grid.appendChild(card);
+  }
+  setStatus('Pronto! ' + resultados.length + ' imagens geradas.');
+  document.getElementById('btnZip').disabled = false;
+});
+
+document.getElementById('btnZip').addEventListener('click', async () => {
+  if (!resultados.length) return;
+  if (typeof JSZip === 'undefined') {
+    alert('Não foi possível carregar o JSZip (precisa de internet). Use o botão "Baixar" em cada imagem.');
+    return;
+  }
+  setStatus('Montando o ZIP...');
+  const zip = new JSZip();
+  resultados.forEach(r => zip.file(r.arquivo, r.blob));
+  const conteudo = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(conteudo);
+  a.download = 'rifas_ministerio_feminino.zip';
+  a.click();
+  setStatus('ZIP baixado.');
+});
+</script>
+</body>
+</html>
